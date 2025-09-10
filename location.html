@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Местоположение</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+    <h2>Определение местоположения...</h2>
+    <div id="status">Получение координат...</div>
+    <button id="sendBtn" style="display:none;" onclick="sendLocation()">Отправить в бот</button>
+
+    <script>
+        const statusDiv = document.getElementById('status');
+        const sendBtn = document.getElementById('sendBtn');
+        let userLocation = null;
+    
+        if (window.Telegram && window.Telegram.WebApp) {
+            const webApp = window.Telegram.WebApp;
+            webApp.ready();
+            
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    function(position) {
+                        userLocation = {
+                            latitude: position.coords.latitude,
+                            longitude: position.coords.longitude
+                        };
+                        statusDiv.innerHTML = 
+                            `Координаты определены:<br>
+                            Широта: ${userLocation.latitude}<br>
+                            Долгота: ${userLocation.longitude}`;
+                        sendBtn.style.display = 'block';
+                    },
+                    function(error) {
+                        statusDiv.innerHTML = 'Ошибка получения местоположения: ' + error.message;
+                    }
+                );
+            } else {
+                statusDiv.innerHTML = 'Геолокация не поддерживается вашим браузером';
+            }
+        } else {
+            statusDiv.innerHTML = 'Это приложение должно запускаться внутри Telegram';
+        }
+
+        function sendLocation() {
+            if (userLocation) {
+                window.Telegram.WebApp.sendData(JSON.stringify(userLocation));
+            }
+        }
+    </script>
+</body>
+</html>
