@@ -1,6 +1,6 @@
 # bot/handlers.py
 from aiogram import Router, F
-from aiogram.types import Message, Location, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
+from aiogram.types import Message, Location
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 import json
@@ -10,15 +10,14 @@ from bot.database import (
     get_user_route, update_route_step, get_route_step,
     add_visited_object, add_points, get_shop_items
 )
-
 from bot.deepseek_integration import get_route_from_deepseek, get_interests_suggestions
-from bot.location_utils import is_location_match
+from bot.location_utils import is_location_match, format_coordinates, calculate_distance
 from bot.keyboards import (
     get_main_keyboard, get_profile_keyboard, get_settings_keyboard,
     get_route_settings_keyboard, get_shop_keyboard, get_back_keyboard,
     get_confirmation_keyboard, get_interests_suggestion_keyboard
 )
-from bot.config import POINTS_PER_OBJECT
+from bot.config import POINTS_PER_OBJECT, LOCATION_ACCURACY
 
 router = Router()
 
@@ -152,7 +151,8 @@ async def process_route_count(message: Message, state: FSMContext):
 
         route_text = "Ваш маршрут:\n\n"
         for i, obj in enumerate(route, 1):
-            route_text += f"{i}. {obj['name']}\n   {obj['description']}\n\n"
+            route_text += f"{i}. {obj['name']}\n   {obj['description']}\n"
+            route_text += f"   Координаты: {format_coordinates(obj['latitude'], obj['longitude'])}\n\n"
 
         await message.answer(route_text, reply_markup=get_route_settings_keyboard())
         await state.set_state(UserStates.on_route)
@@ -161,56 +161,127 @@ async def process_route_count(message: Message, state: FSMContext):
         await state.clear()
 
 
-@router.message(F.text == "📍 Отправить местоположение")
-async def request_location(message: Message):
-    web_app_url = " "
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📍 Определить местоположение", web_app=WebAppInfo(url=web_app_url))]
-    ])
-
-    await message.answer("Нажмите кнопку для автоматического определения местоположения:", reply_markup=keyboard)
-
-
 @router.message(F.location)
 async def process_location(message: Message, state: FSMContext):
+    "Обработка полученных координат пользователя"
     user_lat = message.location.latitude
     user_lon = message.location.longitude
 
+    # Получаем текущего пользователя и его маршрут
     user = get_user(message.from_user.id)
+    if not user:
+        await message.answer("Пожалуйста, сначала зарегистрируйтесь с помощью /start")
+        return
+
     route = get_user_route(message.from_user.id)
     step = get_route_step(message.from_user.id)
 
-    if not route or step >= len(route):
-        await message.answer("У вас нет активного маршрута или вы уже завершили его!")
+    # Проверяем, есть ли активный маршрут
+    if not route or len(route) == 0:
+        await message.answer("У вас нет активного маршрута. Сначала создайте маршрут.",
+                             reply_markup=get_main_keyboard())
+        await state.clear()
         return
 
+    # Проверяем, не завершен ли маршрут
+    if step >= len(route):
+        await message.answer("Вы уже завершили этот маршрут! Создайте новый маршрут.",
+                             reply_markup=get_main_keyboard())
+        await state.clear()
+        return
+
+    # Получаем текущий объект маршрута
     current_object = route[step]
     target_lat = current_object['latitude']
     target_lon = current_object['longitude']
+    object_name = current_object['name']
 
+    # Показываем пользователю его координаты и координаты цели
+    location_info = f"📍 Ваши координаты: {format_coordinates(user_lat, user_lon)}\n"
+    location_info += f"🎯 Цель ({object_name}): {format_coordinates(target_lat, target_lon)}\n\n"
+
+    # Проверяем совпадение координат
     if is_location_match(user_lat, user_lon, target_lat, target_lon):
-        # Location matches
+        # Координаты совпадают - засчитываем посещение
         add_visited_object(message.from_user.id, current_object)
         add_points(message.from_user.id, POINTS_PER_OBJECT)
 
-        await message.answer(f"✅ Поздравляем! Вы посетили {current_object['name']}\n+{POINTS_PER_OBJECT} баллов")
+        success_message = f"✅ Поздравляем! Вы достигли объекта: {object_name}\n"
+        success_message += f"📍 Точность: в пределах {LOCATION_ACCURACY} метров\n"
+        success_message += f"💰 +{POINTS_PER_OBJECT} баллов\n\n"
 
-        # Move to next step
+        # Переходим к следующему объекту
         next_step = step + 1
         update_route_step(message.from_user.id, next_step)
 
         if next_step < len(route):
+            # Есть еще объекты в маршруте
             next_object = route[next_step]
-            await message.answer(f"Следующий объект: {next_object['name']}\n{next_object['description']}")
+            success_message += f"Следующий объект: {next_object['name']}\n"
+            success_message += f"{next_object['description']}\n"
+            success_message += f"Координаты: {format_coordinates(next_object['latitude'], next_object['longitude'])}"
+            await message.answer(success_message, reply_markup=get_route_settings_keyboard())
         else:
-            # Route completed
+            # Маршрут завершен
             total_points = len(route) * POINTS_PER_OBJECT
-            await message.answer(f"🎉 Поздравляем! Вы завершили маршрут!\nВсего получено: {total_points} баллов",
-                                 reply_markup=get_main_keyboard())
+            success_message += f"🎉 Поздравляем! Вы завершили весь маршрут!\n"
+            success_message += f"Всего получено: {total_points} баллов"
+            await message.answer(success_message, reply_markup=get_main_keyboard())
             await state.clear()
     else:
-        # Location doesn't match
-        await message.answer("📍 Вы еще не достигли объекта. Попробуйте подойти ближе.")
+        # Координаты не совпадают
+        distance = calculate_distance(user_lat, user_lon, target_lat, target_lon)
+        fail_message = location_info
+        fail_message += f"❌ Вы еще не достигли объекта {object_name}\n"
+        fail_message += f"📏 Расстояние до цели: {distance:.0f} метров\n"
+        fail_message += f"🎯 Требуемая точность: {LOCATION_ACCURACY} метров\n\n"
+        fail_message += "Попробуйте подойти ближе и отправить местоположение снова."
+        await message.answer(fail_message, reply_markup=get_route_settings_keyboard())
+
+
+@router.message(F.text == "📍 Отправить местоположение")
+async def request_location(message: Message):
+    """Запрос координат у пользователя"""
+    await message.answer(
+        "Пожалуйста, отправьте ваше текущее местоположение, нажав на скрепку и выбрав 'Геопозиция' или 'Location'")
+
+
+@router.message(F.text == "🔢 Изменить количество объектов")
+async def change_route_count(message: Message, state: FSMContext):
+    await message.answer("Сколько объектов вы хотите в маршруте? (от 1 до 20)")
+    await state.set_state(UserStates.waiting_for_route_count)
+
+
+@router.message(F.text == "🔄 Пересоздать маршрут")
+async def recreate_route(message: Message, state: FSMContext):
+    user = get_user(message.from_user.id)
+    if not user or not user[5]:  # interests
+        await message.answer("Сначала укажите ваши интересы в настройках!")
+        return
+
+    # Получаем предыдущее количество объектов или ставим 5 по умолчанию
+    route = get_user_route(message.from_user.id)
+    count = len(route) if route and len(route) > 0 else 5
+
+    await message.answer(f"Создаю новый маршрут с {count} объектами...")
+
+    # Generate route using DeepSeek
+    route = get_route_from_deepseek(user[5], count)
+
+    if route:
+        update_user_route(message.from_user.id, route)
+        update_route_step(message.from_user.id, 0)
+
+        route_text = "Новый маршрут:\n\n"
+        for i, obj in enumerate(route, 1):
+            route_text += f"{i}. {obj['name']}\n   {obj['description']}\n"
+            route_text += f"   Координаты: {format_coordinates(obj['latitude'], obj['longitude'])}\n\n"
+
+        await message.answer(route_text, reply_markup=get_route_settings_keyboard())
+        await state.set_state(UserStates.on_route)
+    else:
+        await message.answer("Не удалось создать маршрут. Попробуйте позже.", reply_markup=get_main_keyboard())
+        await state.clear()
 
 
 @router.message(F.text == "👤 Мой профиль")
@@ -220,6 +291,10 @@ async def show_profile(message: Message):
         await message.answer("Сначала зарегистрируйтесь с помощью /start")
         return
 
+    # Получаем информацию о текущем маршруте
+    route = get_user_route(message.from_user.id)
+    step = get_route_step(message.from_user.id)
+
     profile_text = f"""
 👤 Профиль:
 Имя: {user[2]}
@@ -227,9 +302,17 @@ async def show_profile(message: Message):
 Баллы: {user[4]}
 
 📊 Статистика:
-- Пройденные маршруты: {len(json.loads(user[7]) if user[7] else []) // 5 if user[7] else 0}
-- Посещенные объекты: {len(json.loads(user[7]) if user[7] else [])}
+- Посещенные объекты: {len(user[7]) if user[7] else 0}
 """
+
+    # Добавляем информацию о текущем маршруте
+    if route and len(route) > 0:
+        if step < len(route):
+            current_object = route[step]
+            profile_text += f"\n🧭 Текущий маршрут: {len(route)} объектов\n"
+            profile_text += f"📍 Текущий объект: {current_object['name']} ({step + 1}/{len(route)})"
+        else:
+            profile_text += f"\n✅ Маршрут завершен: {len(route)} объектов"
 
     await message.answer(profile_text, reply_markup=get_profile_keyboard())
 

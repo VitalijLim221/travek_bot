@@ -1,8 +1,9 @@
+# bot/keyboards.py
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 
 
 def get_main_keyboard():
-    "Main menu keyboard"
+    """Main menu keyboard"""
     keyboard = [
         [KeyboardButton(text="👤 Мой профиль")],
         [KeyboardButton(text="🧭 Подобрать маршрут")],
@@ -13,7 +14,7 @@ def get_main_keyboard():
 
 
 def get_profile_keyboard():
-    "Profile menu keyboard"
+    """Profile menu keyboard"""
     keyboard = [
         [KeyboardButton(text="📊 Мои баллы")],
         [KeyboardButton(text="📍 Мои маршруты")],
@@ -24,7 +25,7 @@ def get_profile_keyboard():
 
 
 def get_settings_keyboard():
-    "Settings menu keyboard"
+    """Settings menu keyboard"""
     keyboard = [
         [KeyboardButton(text="✏️ Изменить интересы")],
         [KeyboardButton(text="📱 Изменить телефон")],
@@ -34,18 +35,18 @@ def get_settings_keyboard():
 
 
 def get_route_settings_keyboard():
-    "Route settings keyboard"
+    """Route settings keyboard"""
     keyboard = [
         [KeyboardButton(text="🔢 Изменить количество объектов")],
         [KeyboardButton(text="🔄 Пересоздать маршрут")],
-        [KeyboardButton(text="📍 Отправить местоположение")],
+        [KeyboardButton(text="📍 Отправить местоположение", request_location=True)],
         [KeyboardButton(text="🔙 Назад")]
     ]
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
 
 def get_shop_keyboard():
-    "Shop menu keyboard"
+    """Shop menu keyboard"""
     keyboard = [
         [KeyboardButton(text="🛒 Все товары")],
         [KeyboardButton(text="🏅 Мои баллы")],
@@ -56,13 +57,13 @@ def get_shop_keyboard():
 
 
 def get_back_keyboard():
-    "Back button keyboard"
+    """Back button keyboard"""
     keyboard = [[KeyboardButton(text="🔙 Назад")]]
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
 
 def get_confirmation_keyboard():
-    "Confirmation keyboard"
+    """Confirmation keyboard"""
     keyboard = [
         [KeyboardButton(text="✅ Да"), KeyboardButton(text="❌ Нет")]
     ]
@@ -70,7 +71,7 @@ def get_confirmation_keyboard():
 
 
 def get_interests_suggestion_keyboard(interests_list):
-    "Keyboard with interest suggestions"
+    """Keyboard with interest suggestions"""
     keyboard = []
     for i in range(0, len(interests_list), 2):
         row = []
